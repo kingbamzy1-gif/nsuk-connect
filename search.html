@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Search — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<div id="toast"></div>
+
+<nav class="navbar" id="navbar"></nav>
+<nav class="mobile-nav"><div class="mobile-nav-inner" id="mobile-nav-inner"></div></nav>
+
+<div class="main-wrap">
+  <div class="page-inner">
+    <div class="page-header"><h1>Search Students</h1></div>
+
+    <!-- Search bar -->
+    <div class="search-bar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="search-input" placeholder="Search by username…" autocomplete="off">
+    </div>
+
+    <!-- Results -->
+    <div id="search-results">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <h3>Find your classmates</h3>
+        <p>Search for fellow NSUK students by their username.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+requireAuth(async user => {
+  _currentUid = user.uid;
+  const userData = await getUser(user.uid);
+  buildNav('search');
+  fillNavUser(userData);
+});
+
+let searchTimer;
+document.getElementById('search-input').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (!q) {
+    document.getElementById('search-results').innerHTML = `
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <h3>Find your classmates</h3>
+        <p>Search for fellow NSUK students by their username.</p>
+      </div>`;
+    return;
+  }
+  searchTimer = setTimeout(() => doSearch(q), 350);
+});
+
+async function doSearch(query) {
+  const resultsEl = document.getElementById('search-results');
+  resultsEl.innerHTML = '<div class="spin-wrap"><div class="spinner"></div></div>';
+
+  try {
+    const q = query.toLowerCase();
+    const snap = await db.collection('users')
+      .where('username', '>=', q)
+      .where('username', '<=', q + '\uf8ff')
+      .limit(25).get();
+
+    if (snap.empty) {
+      resultsEl.innerHTML = `<div class="empty"><h3>No results</h3><p>No students found for "<strong>${esc(query)}</strong>".</p></div>`;
+      return;
+    }
+
+    const rows = snap.docs.map(d => {
+      const u = { id: d.id, ...d.data() };
+      const av = avatarHtml(u, 46);
+      return `
+        <div class="user-row" onclick="window.location.href='profile.html?uid=${u.id}'">
+          ${av}
+          <div class="user-row-info">
+            <div class="user-row-name">${esc(u.displayName||u.username)}</div>
+            <div class="user-row-meta">@${esc(u.username)} · ${(u.followers||[]).length} followers</div>
+          </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:var(--text-light);"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>`;
+    }).join('');
+
+    resultsEl.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">${rows}</div>`;
+  } catch (err) {
+    console.error(err);
+    resultsEl.innerHTML = '<div class="empty"><p>Search failed. Please try again.</p></div>';
+  }
+}
+</script>
+</body>
+</html>

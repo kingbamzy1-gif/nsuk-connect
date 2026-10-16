@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saved Posts — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<div id="toast"></div>
+<div id="modal-backdrop" class="modal-backdrop hidden"><div class="modal-box" id="modal-box"></div></div>
+
+<nav class="navbar" id="navbar"></nav>
+<nav class="mobile-nav"><div class="mobile-nav-inner" id="mobile-nav-inner"></div></nav>
+
+<div class="main-wrap">
+  <div class="page-inner">
+    <div class="page-header">
+      <h1>🔖 Saved Posts</h1>
+    </div>
+    <div id="saved-container">
+      <div class="spin-wrap"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+let currentUser = null;
+
+requireAuth(async user => {
+  currentUser = user;
+  _currentUid = user.uid;
+  const userData = await getUser(user.uid);
+  buildNav('saved');
+  fillNavUser(userData);
+  loadSavedPosts();
+});
+
+async function loadSavedPosts() {
+  const container = document.getElementById('saved-container');
+  container.innerHTML = '<div class="spin-wrap"><div class="spinner"></div></div>';
+
+  try {
+    // Get saved post IDs from user document
+    const userSnap = await db.collection('users').doc(currentUser.uid).get();
+    const savedIds  = userSnap.data().savedPosts || [];
+
+    if (savedIds.length === 0) {
+      container.innerHTML = `
+        <div class="empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+          <h3>No saved posts yet</h3>
+          <p>When you save a post, it will appear here. Tap 🔖 on any post to save it.</p>
+        </div>`;
+      return;
+    }
+
+    // Fetch each saved post (Firestore 'in' supports up to 10 at a time)
+    const chunks = [];
+    for (let i = 0; i < savedIds.length; i += 10) {
+      chunks.push(savedIds.slice(i, i + 10));
+    }
+
+    let allDocs = [];
+    for (const chunk of chunks) {
+      const snap = await db.collection('posts')
+        .where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      allDocs = allDocs.concat(snap.docs);
+    }
+
+    if (allDocs.length === 0) {
+      container.innerHTML = `
+        <div class="empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+          <h3>Saved posts not found</h3>
+          <p>Some saved posts may have been deleted by their owners.</p>
+        </div>`;
+      return;
+    }
+
+    // Sort by timestamp descending (newest saved first)
+    allDocs.sort((a, b) => {
+      const ta = a.data().timestamp?.toDate?.() || new Date(0);
+      const tb = b.data().timestamp?.toDate?.() || new Date(0);
+      return tb - ta;
+    });
+
+    // Render post cards
+    const cards = await Promise.all(
+      allDocs.map(d => renderPostCard(d.id, d.data(), currentUser.uid))
+    );
+
+    container.innerHTML = `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+        ${allDocs.length} saved post${allDocs.length !== 1 ? 's' : ''}
+      </p>
+      ${cards.join('')}`;
+
+    // Load comment previews and bookmark states
+    allDocs.forEach(d => loadCommentPreview(d.id));
+    loadBookmarkStates();
+
+  } catch(err) {
+    console.error('Saved posts error:', err);
+    container.innerHTML = '<div class="empty"><p>Failed to load saved posts.</p></div>';
+  }
+}
+</script>
+</body>
+</html>

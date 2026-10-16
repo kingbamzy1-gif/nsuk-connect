@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body{background:linear-gradient(135deg,#043d12 0%,#0a6e2b 55%,#1a9940 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+    .auth-card{background:#fff;border-radius:20px;padding:36px 32px;width:100%;max-width:440px;box-shadow:0 24px 64px rgba(0,0,0,.25);animation:slideUp .4s ease;}
+    body.dark .auth-card{background:#1c1c1c;color:#f0f0f0;}
+    .auth-logo{text-align:center;margin-bottom:24px;}
+    .auth-logo .al-icon{width:56px;height:56px;border-radius:14px;background:transparent;display:inline-flex;align-items:center;justify-content:center;margin-bottom:8px;overflow:hidden;border:2px solid var(--border);}
+    .auth-logo .al-icon svg{width:30px;height:30px;fill:#fff;}
+    .auth-logo h2{font-family:'DM Serif Display',serif;font-size:22px;color:var(--green);}
+    .auth-logo p{font-size:12px;color:var(--text-muted);margin-top:2px;}
+    .auth-switch{text-align:center;margin-top:16px;font-size:14px;color:var(--text-muted);}
+    .auth-switch a{color:var(--green);font-weight:800;}
+    .auth-switch a:hover{text-decoration:underline;}
+    .avatar-row{display:flex;align-items:center;gap:14px;}
+    .av-preview{width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;flex-shrink:0;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:24px;}
+    .av-preview img{width:100%;height:100%;object-fit:cover;}
+    .av-upload-btn{flex:1;padding:9px 14px;border:1.5px dashed var(--border);border-radius:var(--radius);font-size:13px;color:var(--text-muted);cursor:pointer;text-align:center;transition:border-color .2s,color .2s;}
+    .av-upload-btn:hover{border-color:var(--green);color:var(--green);}
+    @keyframes slideUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+  
+    /* Dark mode for auth page */
+    body.dark { background:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 100%) !important; }
+    body.dark .auth-card { background:#1c1c1c !important; color:#f0f0f0 !important; }
+    body.dark .form-input { background:#272727 !important; color:#f0f0f0 !important; border-color:#333 !important; }
+    body.dark .auth-switch { color:#9a9a9a !important; }
+    body.dark .form-group label { color:#9a9a9a !important; }
+    body.dark .av-upload-btn { border-color:#333 !important; color:#9a9a9a !important; }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<script>
+  // Apply dark mode immediately to prevent flash
+  if (localStorage.getItem('nsuk_dark') === '1') {
+    document.documentElement.style.setProperty('--auth-bg', '#1c1c1c');
+    document.documentElement.style.setProperty('--auth-text', '#f0f0f0');
+    document.body && document.body.classList.add('dark');
+  }
+</script>
+<div id="toast"></div>
+
+<div class="auth-card">
+  <div class="auth-logo">
+    <div class="al-icon">
+      <img src="images/nsuk_logo.jpg" alt="NSUK" style="width:36px;height:36px;object-fit:contain;border-radius:8px;">
+    </div>
+    <h2>Join NSUK Connect</h2>
+    <p>Create your student account</p>
+  </div>
+
+  <form id="signup-form" novalidate>
+    
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input class="form-input" type="text" id="username" placeholder="e.g. john_nsuk" required minlength="3" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label for="email">Email Address</label>
+      <input class="form-input" type="email" id="email" placeholder="your@email.com" required autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input class="form-input" type="password" id="password" placeholder="Min. 6 characters" required minlength="6" autocomplete="new-password">
+    </div>
+
+    <p class="form-error" id="signup-err"></p>
+    <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;" id="signup-btn">Create Account</button>
+  </form>
+
+  <p class="auth-switch">Already have an account? <a href="login.html">Log In</a></p>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+  requireGuest(() => {/* stay */});
+
+  let avatarFile = null;
+
+  /* Avatar file selection */
+  document.getElementById('av-btn').addEventListener('click', () => document.getElementById('av-input').click());
+  document.getElementById('av-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    avatarFile = file;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      document.getElementById('av-preview').innerHTML = `<img src="${ev.target.result}" alt="preview">`;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('signup-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const errEl = document.getElementById('signup-err');
+    const btn   = document.getElementById('signup-btn');
+    errEl.classList.remove('show');
+
+    const username = document.getElementById('username').value.trim();
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    /* Validation */
+    if (!username || !email || !password) {
+      errEl.textContent = 'Please fill in all required fields.'; errEl.classList.add('show'); return;
+    }
+    if (username.length < 3) {
+      errEl.textContent = 'Username must be at least 3 characters.'; errEl.classList.add('show'); return;
+    }
+    if (!/^[a-zA-Z0-9_.]+$/.test(username)) {
+      errEl.textContent = 'Username can only contain letters, numbers, _ and .'; errEl.classList.add('show'); return;
+    }
+    if (password.length < 6) {
+      errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.add('show'); return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Creating account…';
+
+    try {
+      /* Check username uniqueness */
+      const usernameSnap = await db.collection('users').where('username','==',username.toLowerCase()).get();
+      if (!usernameSnap.empty) {
+        errEl.textContent = 'Username already taken. Please choose another.';
+        errEl.classList.add('show');
+        btn.disabled = false; btn.textContent = 'Create Account'; return;
+      }
+
+      /* Create Firebase Auth account */
+      const cred = await auth.createUserWithEmailAndPassword(email, password);
+      const uid  = cred.user.uid;
+
+      /* Upload profile picture to Cloudinary (free image hosting) */
+      let profileImage = '';
+      if (avatarFile) {
+        try {
+          profileImage = await uploadToCloudinary(avatarFile, 'profile_pictures');
+        } catch (storageErr) {
+          console.warn('Profile photo skipped:', storageErr.message);
+          // Continue signup without photo — user can add later
+        }
+      }
+
+      /* Save user document to Firestore */
+      await db.collection('users').doc(uid).set({
+        username:     username.toLowerCase(),
+        displayName:  username,
+        email,
+        profileImage,
+        bio:          `Hi, I'm ${username}! NSUK student 🎓`,
+        followers:    [],
+        following:    [],
+        createdAt:    firebase.firestore.FieldValue.serverTimestamp(),
+      });
+
+      toast('Account created! Welcome 🎉');
+      setTimeout(() => window.location.href = 'feed.html', 800);
+    } catch (err) {
+      errEl.textContent = authErr(err.code);
+      errEl.classList.add('show');
+      btn.disabled = false; btn.textContent = 'Create Account';
+    }
+  });
+
+function toggleAuthDark() {
+  const on = document.body.classList.toggle('dark');
+  localStorage.setItem('nsuk_dark', on ? '1' : '0');
+}
+// Apply on load
+if (localStorage.getItem('nsuk_dark') === '1') document.body.classList.add('dark');
+
+</script>
+</body>
+</html>

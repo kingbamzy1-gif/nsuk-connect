@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<div id="toast"></div>
+<div id="modal-backdrop" class="modal-backdrop hidden"><div class="modal-box" id="modal-box"></div></div>
+
+<nav class="navbar" id="navbar"></nav>
+<nav class="mobile-nav"><div class="mobile-nav-inner" id="mobile-nav-inner"></div></nav>
+
+<div class="main-wrap">
+  <div class="page-inner" id="profile-root">
+    <div class="spin-wrap"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+let me = null;
+let meData = null;
+let targetUid = null;
+
+requireAuth(async user => {
+  me = user; _currentUid = user.uid;
+
+  // Try to get user data, create document if it doesn't exist yet
+  meData = await getOrCreateUser(user);
+  buildNav('profile');
+  fillNavUser(meData);
+
+  /* Determine whose profile to show */
+  const params = new URLSearchParams(window.location.search);
+  targetUid = params.get('uid') || user.uid;
+
+  renderProfile(targetUid);
+});
+
+// Get user data or create a document if missing
+async function getOrCreateUser(user) {
+  let userData = await getUser(user.uid);
+  if (!userData) {
+    // User doc missing — create with merge:true so follow data is NEVER wiped
+    const fallback = {
+      username:    (user.email || 'student').split('@')[0].toLowerCase(),
+      displayName: (user.email || 'Student').split('@')[0],
+      email:       user.email || '',
+      profileImage:'',
+      bio:         'NSUK student 🎓',
+      createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+      // Do NOT set followers:[] or following:[] here —
+      // that would erase any existing follow relationships
+    };
+    try {
+      // merge:true = only write fields that don't already exist
+      await db.collection('users').doc(user.uid).set(fallback, { merge: true });
+      // Initialise arrays only if they truly don't exist yet
+      await db.collection('users').doc(user.uid).update({
+        followers: firebase.firestore.FieldValue.arrayUnion(),
+        following: firebase.firestore.FieldValue.arrayUnion(),
+      }).catch(() => {});
+      invalidateUser(user.uid);
+      userData = await getUser(user.uid);
+    } catch(e) {
+      console.warn('Could not create user doc:', e.message);
+      userData = { id: user.uid, ...fallback, followers: [], following: [] };
+    }
+  }
+  return userData;
+}
+
+async function renderProfile(uid) {
+  const root = document.getElementById('profile-root');
+  root.innerHTML = '<div class="spin-wrap"><div class="spinner"></div></div>';
+
+  // For own profile, use getOrCreateUser to ensure doc exists
+  let userData;
+  if (uid === me.uid) {
+    userData = await getOrCreateUser(me);
+  } else {
+    userData = await getUser(uid);
+  }
+  if (!userData) { root.innerHTML = '<div class="empty"><h3>User not found</h3><p>This user may not exist.</p></div>'; return; }
+
+  const isOwn     = uid === me.uid;
+  const isFollowing = (userData.followers||[]).includes(me.uid);
+  const postsSnap = await db.collection('posts').where('userId','==',uid).orderBy('timestamp','desc').get();
+
+  /* Avatar */
+  const picHtml = userData.profileImage
+    ? `<img src="${userData.profileImage}" alt="${esc(userData.displayName||userData.username)}">`
+    : `<div class="av-init" style="font-size:34px;">${(userData.displayName||userData.username||'?').slice(0,2).toUpperCase()}</div>`;
+
+  /* Posts grid */
+  const gridCells = postsSnap.docs.map(d => {
+    const p = d.data();
+    return `
+      <div class="grid-cell" onclick="openPostModal('${d.id}')">
+        ${p.imageUrl
+          ? `<img src="${p.imageUrl}" alt="post" loading="lazy">`
+          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;background:var(--surface2);">📝</div>`
+        }
+        <div class="grid-cell-overlay">
+          <span>
+            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            ${(p.likes||[]).length}
+          </span>
+          <span>
+            <svg viewBox="0 0 24 24" stroke="white" stroke-width="2" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            ${p.commentCount||0}
+          </span>
+        </div>
+      </div>`;
+  }).join('');
+
+  root.innerHTML = `
+    <!-- Profile hero card -->
+    <div class="profile-hero">
+      <div class="profile-top">
+        <div class="profile-pic-ring">
+          <div class="profile-pic-inner">${picHtml}</div>
+        </div>
+        <div class="profile-info">
+          <div class="profile-uname">${esc(userData.displayName||userData.username)}</div>
+          <div class="profile-stats">
+            <div class="pstat"><span class="pstat-n" id="post-count">${postsSnap.size}</span><span class="pstat-l">Posts</span></div>
+            <div class="pstat"><span class="pstat-n" id="follower-count">${(userData.followers||[]).length}</span><span class="pstat-l">Followers</span></div>
+            <div class="pstat"><span class="pstat-n">${(userData.following||[]).length}</span><span class="pstat-l">Following</span></div>
+          </div>
+          <div class="profile-bio" id="profile-bio">${esc(userData.bio||'No bio yet.')}</div>
+          <div class="profile-actions">
+            ${isOwn
+              ? `<button class="btn btn-outline btn-sm" onclick="openEditModal()">Edit Profile</button>
+                 <button class="btn btn-outline btn-sm" onclick="auth.signOut().then(()=>window.location.href='login.html')">Log Out</button>`
+              : `<button class="btn-follow ${isFollowing?'following':''}" id="follow-btn" onclick="toggleFollow('${uid}')">${isFollowing?'Following':'Follow'}</button>`
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-tabs">
+        <div class="ptab active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Posts
+        </div>
+      </div>
+    </div>
+
+    <!-- Posts grid -->
+    ${postsSnap.empty
+      ? `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><h3>No posts yet</h3><p>${isOwn?'Share your first post!':'This user has no posts yet.'}</p></div>`
+      : `<div class="posts-grid">${gridCells}</div>`
+    }
+  `;
+}
+
+/* ── Open single post in modal ── */
+async function openPostModal(postId) {
+  const snap = await db.collection('posts').doc(postId).get();
+  if (!snap.exists) return;
+  const html = await renderPostCard(postId, snap.data(), me.uid);
+  openModal(html);
+  setTimeout(() => loadCommentPreview(postId), 100);
+}
+
+/* ── Follow / Unfollow ── */
+async function toggleFollow(uid) {
+  const btn = document.getElementById('follow-btn');
+  if (!btn) return;
+
+  // Disable button while working to prevent double-clicks
+  btn.disabled = true;
+
+  try {
+    const targetRef = db.collection('users').doc(uid);
+    const myRef     = db.collection('users').doc(me.uid);
+
+    // Always read fresh from Firestore — never from cache
+    invalidateUser(uid);
+    invalidateUser(me.uid);
+    const targetSnap = await targetRef.get();
+
+    if (!targetSnap.exists) {
+      toast('User not found.'); btn.disabled = false; return;
+    }
+
+    const isFollowing = (targetSnap.data().followers || []).includes(me.uid);
+
+    if (isFollowing) {
+      // Unfollow
+      await targetRef.update({ followers: firebase.firestore.FieldValue.arrayRemove(me.uid) });
+      await myRef.update({    following: firebase.firestore.FieldValue.arrayRemove(uid) });
+      btn.textContent = 'Follow';
+      btn.classList.remove('following');
+      const fc = document.getElementById('follower-count');
+      if (fc) fc.textContent = Math.max(0, parseInt(fc.textContent || 0) - 1);
+      toast('Unfollowed.');
+    } else {
+      // Follow
+      await targetRef.update({ followers: firebase.firestore.FieldValue.arrayUnion(me.uid) });
+      await myRef.update({    following: firebase.firestore.FieldValue.arrayUnion(uid) });
+      btn.textContent = 'Following';
+      btn.classList.add('following');
+      const fc = document.getElementById('follower-count');
+      if (fc) fc.textContent = parseInt(fc.textContent || 0) + 1;
+      addNotif(uid, me.uid, 'follow', '', '');
+      toast('Following! 🎉');
+    }
+
+    // Refresh local user cache so stories/feed reflect new follow state
+    invalidateUser(me.uid);
+    meData = await getUser(me.uid);
+
+  } catch(err) {
+    console.error('toggleFollow error:', err.message);
+    toast('Action failed. Please try again.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── Edit Profile modal ── */
+
+function openEditModal() {
+  const u = meData;
+  openModal(`
+    <h3>Edit Profile</h3>
+    <div class="form-group">
+      <label>Profile Picture</label>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;border:2px solid var(--border);flex-shrink:0;" id="ep-av">
+          ${u.profileImage ? `<img src="${u.profileImage}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;">${(u.displayName||u.username||'?').slice(0,2).toUpperCase()}</div>`}
+        </div>
+        <div style="flex:1;padding:9px 14px;border:1.5px dashed var(--border);border-radius:8px;font-size:13px;color:var(--text-muted);cursor:pointer;text-align:center;" onclick="document.getElementById('ep-file').click()">
+          Change photo
+        </div>
+        <input type="file" id="ep-file" accept="image/*" style="display:none">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Display Name</label>
+      <input class="form-input" id="ep-name" value="${esc(u.displayName||u.username||'')}">
+    </div>
+    <div class="form-group">
+      <label>Bio</label>
+      <textarea class="form-input" id="ep-bio" rows="3">${esc(u.bio||'')}</textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="ep-save" onclick="saveProfile()">Save Changes</button>
+    </div>
+  `);
+
+  document.getElementById('ep-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      document.getElementById('ep-av').innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;">`;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveProfile() {
+  const name  = document.getElementById('ep-name').value.trim();
+  const bio   = document.getElementById('ep-bio').value.trim();
+  const file  = document.getElementById('ep-file').files[0];
+  const btn   = document.getElementById('ep-save');
+
+  if (!name) { toast('Name cannot be empty.'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  try {
+    let profileImage = meData.profileImage || '';
+    if (file) {
+      try {
+        toast('Uploading photo…');
+        profileImage = await uploadToCloudinary(file, 'profile_pictures');
+      } catch (storageErr) {
+        console.warn('Photo upload failed:', storageErr.message);
+        toast('Photo upload failed. Other changes saved.');
+      }
+    }
+
+    await db.collection('users').doc(me.uid).update({ displayName: name, bio, profileImage });
+    invalidateUser(me.uid);
+    meData = await getUser(me.uid);
+    fillNavUser(meData);
+    closeModal();
+    toast('Profile updated ✅');
+    renderProfile(me.uid);
+  } catch (_) {
+    toast('Failed to save. Try again.');
+    btn.disabled = false; btn.textContent = 'Save Changes';
+  }
+}
+</script>
+</body>
+</html>

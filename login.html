@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Auth layout ── */
+    body{background:linear-gradient(135deg,#043d12 0%,#0a6e2b 55%,#1a9940 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+    .auth-wrap{display:flex;gap:48px;align-items:center;width:100%;max-width:900px;}
+    .auth-brand{flex:1;color:#fff;display:none;}
+    .auth-brand h1{font-family:'DM Serif Display',serif;font-size:44px;line-height:1.1;margin-bottom:14px;}
+    .auth-brand p{font-size:16px;opacity:.85;line-height:1.6;max-width:320px;}
+    .auth-brand .brand-badge{width:70px;height:70px;border-radius:20px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;margin-bottom:20px;}
+    .auth-brand .brand-badge svg{width:40px;height:40px;fill:#fff;}
+    .auth-card{background:#fff;border-radius:20px;padding:40px 36px;width:100%;max-width:420px;box-shadow:0 24px 64px rgba(0,0,0,.25);animation:slideUp .4s ease;}
+    body.dark .auth-card{background:#1c1c1c;color:#f0f0f0;}
+    .auth-logo{text-align:center;margin-bottom:28px;}
+    .auth-logo .al-icon{width:60px;height:60px;border-radius:16px;background:var(--green);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px;}
+    .auth-logo .al-icon svg{width:34px;height:34px;fill:#fff;}
+    .auth-logo h2{font-family:'DM Serif Display',serif;font-size:26px;color:var(--green);}
+    .auth-logo p{font-size:13px;color:var(--text-muted);margin-top:3px;}
+    .auth-switch{text-align:center;margin-top:20px;font-size:14px;color:var(--text-muted);}
+    .auth-switch a{color:var(--green);font-weight:800;cursor:pointer;}
+    .auth-switch a:hover{text-decoration:underline;}
+    @media(min-width:700px){.auth-brand{display:block;}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+  
+    /* Dark mode for auth page */
+    body.dark { background:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 100%) !important; }
+    body.dark .auth-card { background:#1c1c1c !important; color:#f0f0f0 !important; }
+    body.dark .form-input { background:#272727 !important; color:#f0f0f0 !important; border-color:#333 !important; }
+    body.dark .auth-switch { color:#9a9a9a !important; }
+    body.dark .form-group label { color:#9a9a9a !important; }
+    body.dark .av-upload-btn { border-color:#333 !important; color:#9a9a9a !important; }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<script>
+  // Apply dark mode immediately to prevent flash
+  if (localStorage.getItem('nsuk_dark') === '1') {
+    document.documentElement.style.setProperty('--auth-bg', '#1c1c1c');
+    document.documentElement.style.setProperty('--auth-text', '#f0f0f0');
+    document.body && document.body.classList.add('dark');
+  }
+</script>
+<div id="toast"></div>
+
+<div class="auth-wrap">
+  <!-- Branding panel (visible on desktop) -->
+  <div class="auth-brand">
+    <div class="brand-badge">
+      <img src="images/nsuk_logo.jpg" alt="NSUK" style="width:36px;height:36px;object-fit:contain;border-radius:8px;">
+    </div>
+    <h1>NSUK Connect</h1>
+    <p>The campus social platform for Nasarawa State University, Keffi students. Share moments, connect with classmates, and stay in the loop.</p>
+  </div>
+
+  <!-- Auth card -->
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="al-icon">
+        <img src="images/nsuk_logo.jpg" alt="NSUK" style="width:36px;height:36px;object-fit:contain;border-radius:8px;">
+      </div>
+      <h2>NSUK Connect</h2>
+      <p>Welcome back, NSUK student</p>
+    </div>
+
+    <form id="login-form" novalidate>
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input class="form-input" type="email" id="email" placeholder="your@email.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="password" style="display:flex;justify-content:space-between;align-items:center;">
+          Password
+          <span id="forgot-link" style="font-size:12px;color:#0a6e2b;cursor:pointer;font-weight:700;text-transform:none;letter-spacing:0;">Forgot password?</span>
+        </label>
+        <input class="form-input" type="password" id="password" placeholder="Enter your password" required autocomplete="current-password">
+      </div>
+      <p class="form-error" id="login-err"></p>
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;" id="login-btn">Log In</button>
+    </form>
+
+    <p class="auth-switch">Don't have an account? <a href="signup.html">Sign Up</a></p>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+  /* Redirect if already logged in */
+  requireGuest(() => {/* stay on page */});
+
+  document.getElementById('forgot-link').addEventListener('click', openForgotPassword);
+
+  document.getElementById('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const errEl = document.getElementById('login-err');
+    const btn   = document.getElementById('login-btn');
+    errEl.classList.remove('show');
+
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    if (!email || !password) {
+      errEl.textContent = 'Please fill in all fields.';
+      errEl.classList.add('show'); return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    try {
+      await auth.signInWithEmailAndPassword(email, password);
+      window.location.href = 'feed.html';
+    } catch (err) {
+      errEl.textContent = authErr(err.code);
+      errEl.classList.add('show');
+      btn.disabled = false; btn.textContent = 'Log In';
+    }
+  });
+
+function toggleAuthDark() {
+  const on = document.body.classList.toggle('dark');
+  localStorage.setItem('nsuk_dark', on ? '1' : '0');
+}
+// Apply on load
+if (localStorage.getItem('nsuk_dark') === '1') document.body.classList.add('dark');
+
+
+function openForgotPassword() {
+  // Build modal HTML inline (no shared.js modal on this page)
+  const existing = document.getElementById('forgot-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'forgot-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML = `
+    <div style="background:var(--surface,#fff);border-radius:16px;padding:28px 24px;width:100%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+      <h3 style="font-size:18px;font-weight:800;margin-bottom:8px;">Reset Password</h3>
+      <p style="font-size:14px;color:#6e6e6e;margin-bottom:16px;">Enter your email address and we'll send you a link to reset your password.</p>
+      <input type="email" id="reset-email" placeholder="your@email.com"
+        style="width:100%;padding:11px 14px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none;font-family:'Nunito',sans-serif;box-sizing:border-box;margin-bottom:8px;">
+      <p id="reset-msg" style="font-size:13px;margin-bottom:12px;display:none;"></p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
+        <button onclick="document.getElementById('forgot-modal').remove()"
+          style="padding:9px 18px;border-radius:10px;border:1.5px solid #e0e0e0;background:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:14px;">
+          Cancel
+        </button>
+        <button onclick="sendPasswordReset()"
+          style="padding:9px 18px;border-radius:10px;background:#0a6e2b;color:#fff;border:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:700;font-size:14px;">
+          Send Reset Link
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+async function sendPasswordReset() {
+  const email  = document.getElementById('reset-email').value.trim();
+  const msgEl  = document.getElementById('reset-msg');
+  if (!email) {
+    msgEl.textContent = 'Please enter your email address.';
+    msgEl.style.color = '#e03131';
+    msgEl.style.display = 'block';
+    return;
+  }
+  try {
+    await auth.sendPasswordResetEmail(email);
+    msgEl.textContent = '✅ Reset link sent! Check your email inbox.';
+    msgEl.style.color = '#0a6e2b';
+    msgEl.style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('forgot-modal')?.remove();
+    }, 3000);
+  } catch(err) {
+    const msgs = {
+      'auth/user-not-found': 'No account found with this email.',
+      'auth/invalid-email':  'Please enter a valid email address.',
+    };
+    msgEl.textContent = msgs[err.code] || 'Failed to send reset link. Try again.';
+    msgEl.style.color = '#e03131';
+    msgEl.style.display = 'block';
+  }
+}
+
+</script>
+</body>
+</html>

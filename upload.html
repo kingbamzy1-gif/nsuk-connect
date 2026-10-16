@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Post — NSUK Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+<div id="toast"></div>
+
+<!-- Desktop sidebar -->
+<nav class="navbar" id="navbar"></nav>
+<!-- Mobile nav -->
+<nav class="mobile-nav"><div class="mobile-nav-inner" id="mobile-nav-inner"></div></nav>
+
+<div class="main-wrap">
+  <div class="page-inner" style="max-width:560px;">
+    <div class="page-header">
+      <h1>Create Post</h1>
+    </div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon" id="drop-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <path d="m21 15-5-5L5 21"/>
+        </svg>
+      </div>
+      <div id="drop-prompt">
+        <div class="drop-title">Tap or drag to upload a photo</div>
+        <div class="drop-sub">JPEG, PNG, WEBP — max 5 MB</div>
+      </div>
+      <img id="drop-preview" style="display:none;" alt="Preview">
+      <button class="remove-btn" id="remove-btn" aria-label="Remove image">✕</button>
+    </div>
+    <input type="file" id="img-input" accept="image/*" style="display:none">
+
+    <!-- Form -->
+    <form id="post-form" novalidate>
+      <div class="form-group">
+        <label for="caption">Caption</label>
+        <textarea class="form-input" id="caption" placeholder="Write something about your post… (optional)" maxlength="2200" rows="3"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" class="btn btn-outline" onclick="window.location.href='feed.html'">Cancel</button>
+        <button type="submit" class="btn btn-primary" style="flex:1;" id="share-btn">
+          Share Post
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script>
+let currentUser = null;
+let selectedFile = null;
+
+requireAuth(async user => {
+  currentUser = user;
+  _currentUid = user.uid;
+  const userData = await getUser(user.uid);
+  buildNav('upload');
+  fillNavUser(userData);
+});
+
+/* ── Drag & drop + click ── */
+const zone    = document.getElementById('drop-zone');
+const input   = document.getElementById('img-input');
+const preview = document.getElementById('drop-preview');
+const prompt  = document.getElementById('drop-prompt');
+const icon    = document.getElementById('drop-icon');
+const removeB = document.getElementById('remove-btn');
+
+zone.addEventListener('click', () => { if (!selectedFile) input.click(); });
+input.addEventListener('change', () => { if (input.files[0]) selectFile(input.files[0]); });
+
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave',()=> zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) selectFile(f);
+});
+
+removeB.addEventListener('click', e => { e.stopPropagation(); clearFile(); });
+
+function selectFile(file) {
+  if (file.size > 5 * 1024 * 1024) { toast('File too large — max 5 MB.'); return; }
+  selectedFile = file;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    preview.src = ev.target.result;
+    preview.style.display = 'block';
+    prompt.style.display  = 'none';
+    icon.style.display    = 'none';
+    zone.classList.add('has-img');
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearFile() {
+  selectedFile = null; input.value = '';
+  preview.style.display = 'none';
+  prompt.style.display  = 'block';
+  icon.style.display    = 'block';
+  zone.classList.remove('has-img');
+}
+
+/* ── Submit ── */
+document.getElementById('post-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const caption = document.getElementById('caption').value.trim();
+  const btn     = document.getElementById('share-btn');
+
+  if (!selectedFile && !caption) {
+    toast('Please add an image or write a caption.'); return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Sharing…';
+
+  try {
+    let imageUrl = '';
+    if (selectedFile) {
+      try {
+        toast('Uploading image…');
+        imageUrl = await uploadToCloudinary(selectedFile, 'posts');
+      } catch (storageErr) {
+        console.warn('Image upload failed:', storageErr.message);
+        toast('Image upload failed. Post saved as text only.');
+      }
+    }
+
+    await db.collection('posts').add({
+      userId:       currentUser.uid,
+      imageUrl,
+      caption,
+      likes:        [],
+      commentCount: 0,
+      timestamp:    firebase.firestore.FieldValue.serverTimestamp(),
+    });
+
+    toast('Post shared! 🎉');
+    setTimeout(() => window.location.href = 'feed.html', 800);
+  } catch (err) {
+    console.error('Upload error:', err);
+    toast('Failed to share post. Please try again.');
+    btn.disabled = false; btn.textContent = 'Share Post';
+  }
+});
+</script>
+</body>
+</html>
